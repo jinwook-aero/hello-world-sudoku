@@ -3,7 +3,7 @@
 //
 // Authors      : Jinwook Lee, Sungwook Lee
 // First version: May 24, 2020
-// Last update  : May 24, 2020
+// Last update  : May 25, 2020
 //
 
 #pragma once
@@ -11,9 +11,6 @@
 #include <vector>
 #include <set>
 #include <algorithm>
-#include <random>
-#include <chrono>
-
 #include <windows.h>
 
 // Default size
@@ -49,8 +46,13 @@ private:
 	std::vector<std::vector<T>> _candiateCount2D; // Candidate 
 	std::vector<std::vector<std::set<T>>> _candidateSet2D; // Candidate set
 
+	std::vector<std::set<T>> _rowAvail; // Available list 
+	std::vector<std::set<T>> _colAvail; // Available list
+	std::vector<std::set<T>> _blkAvail; // Available list
+
 	// Solver subroutine
-	void Initialize(); // Initialize candidate list
+	void InitializeAvailability(); // Initialize availability list
+	void InitializeCandidate(); // Initialize candidate list
 	T CountTotalCandidate(); // Returns sum of candidate count
 	void ReduceCandidate();
 	void GuessCandidate(size_t iRow, size_t jCol, size_t nOrder); // Select nOrder'th candidate on (iRow,jCol)
@@ -94,6 +96,10 @@ Sudoku<T>::Sudoku(T nSize):
 	_type2D.resize(_nSize, std::vector<elemType>(_nSize, elemType::unknown));
 	_candiateCount2D.resize(_nSize, std::vector<T>(_nSize));
 	_candidateSet2D.resize(_nSize, std::vector<std::set<T>>(_nSize));
+
+	_rowAvail.resize(_nSize, std::set<T>{});
+	_colAvail.resize(_nSize, std::set<T>{});
+	_blkAvail.resize(_nSize, std::set<T>{});
 }
 
 template <typename T>
@@ -105,6 +111,10 @@ Sudoku<T>::Sudoku(const Sudoku<T> & rhs)
 	_type2D = rhs._type2D;
 	_candiateCount2D = rhs._candiateCount2D;
 	_candidateSet2D  = rhs._candidateSet2D;
+
+	_rowAvail = rhs._rowAvail;
+	_colAvail = rhs._colAvail;
+	_blkAvail = rhs._blkAvail;
 }
 
 template <typename T>
@@ -171,15 +181,9 @@ void Sudoku<T>::Display()
 }
 
 template <typename T>
-void Sudoku<T>::Initialize()
+void Sudoku<T>::InitializeAvailability()
 {
-	// Initialize availability list
-	std::vector<std::set<T>> _rowAvail; // Available list 
-	std::vector<std::set<T>> _colAvail; // Available list
-	std::vector<std::set<T>> _blkAvail; // Available list
-	_rowAvail.resize(_nSize, std::set<T>{});
-	_colAvail.resize(_nSize, std::set<T>{});
-	_blkAvail.resize(_nSize, std::set<T>{});
+	// Initialize availability list (duplicate will be ignored)
 	for (size_t i = 0; i < _nSize; ++i) {
 		for (size_t j = 0; j < _nSize; ++j) {
 			_rowAvail[i].insert(j + 1);
@@ -192,10 +196,10 @@ void Sudoku<T>::Initialize()
 		}
 	}
 
-	// Reduce available numbers if encountered as input
+	// Reduce available numbers if encountered as input or solved
 	for (size_t i = 0; i < _nSize; ++i) {
 		for (size_t j = 0; j < _nSize; ++j) {
-			if (_type2D[i][j] == elemType::input){
+			if (_type2D[i][j] != elemType::unknown){
 				const T curElem = _data2D[i][j];
 				const size_t k = (i / nSizeBlkDefault) * nSizeBlkDefault + (j / nSizeBlkDefault);
 				_rowAvail[i].erase(curElem);
@@ -204,11 +208,16 @@ void Sudoku<T>::Initialize()
 			}
 		}
 	}
+}
 
+
+template <typename T>
+void Sudoku<T>::InitializeCandidate()
+{
 	// Initialize candidate list
 	for (size_t i = 0; i < _nSize; ++i) {
 		for (size_t j = 0; j < _nSize; ++j) {
-			if (_type2D[i][j] != elemType::input){
+			if (_type2D[i][j] == elemType::unknown) {
 				T tempCount = 0;
 				T tempAvail{ invalid };
 				const size_t k = (i / nSizeBlkDefault) * nSizeBlkDefault + (j / nSizeBlkDefault);
@@ -225,9 +234,6 @@ void Sudoku<T>::Initialize()
 			}
 		}
 	}
-
-	// Single candidate is a readily availalbe solution
-	Convert2Solution();
 }
 
 template <typename T>
@@ -250,8 +256,6 @@ void Sudoku<T>::Convert2Solution()
 			if (_type2D[i][j] == elemType::unknown && _candiateCount2D[i][j] == 1) {
 				_data2D[i][j] = *(_candidateSet2D[i][j].begin());
 				_type2D[i][j] = elemType::solved;
-				_candiateCount2D[i][j] = 0;
-				_candidateSet2D[i][j].clear();
 			}
 }
 
@@ -259,6 +263,7 @@ template <typename T>
 void Sudoku<T>::ReduceCandidate()
 {
 	// Reduce candidate space
+	bool isAnythingChanged = false;
 	for (size_t i = 0; i < _nSize; ++i)
 		for (size_t j = 0; j < _nSize; ++j) {
 			if (_type2D[i][j] != elemType::unknown)
@@ -268,9 +273,79 @@ void Sudoku<T>::ReduceCandidate()
 				testGame.GuessCandidate(i, j, test);
 				if (!testGame.IsConsistent()) {
 					this->RemoveCandidate(i, j, test);
+					isAnythingChanged = true;
 				}
 			}
 		}
+	if(isAnythingChanged) {
+		Convert2Solution();
+		InitializeAvailability(); // Reinitialize _rowAvail, _colAvail, _blkAvail
+	}
+
+	// Row insufficiency - Search for unique candidate that exists only in one cell along the row
+	isAnythingChanged = false;
+	for (size_t i = 0; i < _nSize; ++i)
+		for (size_t avail : _rowAvail[i]){
+			size_t tempCount = 0;
+			for (size_t j = 0; j < _nSize; ++j)
+				if (_candidateSet2D[i][j].count(avail) > 0)
+					++tempCount;
+			if (tempCount == 1) {// Unique candidate ==> Solution
+				for (size_t j = 0; j < _nSize; ++j)
+					if (_candidateSet2D[i][j].count(avail) > 0) {
+						_data2D[i][j] = avail;
+						_type2D[i][j] = elemType::solved;
+						isAnythingChanged = true;
+						break;
+					}
+			}
+		}
+	if (isAnythingChanged) 
+		InitializeAvailability(); // Reinitialize _rowAvail, _colAvail, _blkAvail
+
+	// Col insufficiency - Search for unique candidate that exists only in one cell along the col
+	isAnythingChanged = false;
+	for (size_t j = 0; j < _nSize; ++j)
+		for (size_t avail : _colAvail[j]) {
+			size_t tempCount = 0;
+			for (size_t i = 0; i < _nSize; ++i)
+				if (_type2D[i][j] == elemType::unknown && _candidateSet2D[i][j].count(avail) > 0)
+					++tempCount;
+			if (tempCount == 1) {// Unique candidate
+				for (size_t i = 0; i < _nSize; ++i)
+					if (_type2D[i][j] == elemType::unknown && _candidateSet2D[i][j].count(avail) > 0) {
+						_data2D[i][j] = avail;
+						_type2D[i][j] = elemType::solved;
+						isAnythingChanged = true;
+						break;
+					}
+			}
+		}
+	if (isAnythingChanged)
+		InitializeAvailability(); // Reinitialize _rowAvail, _colAvail, _blkAvail
+
+	// Blk insufficiency - Search for unique candidate that exists only in one cell in the block
+	isAnythingChanged = false;
+	for (size_t k = 0; k < _nSize; ++k) 
+		for (size_t avail : _blkAvail[k]) {
+			size_t tempCount = 0;
+			for (size_t i = (k / 3) * 3; i < (k / 3 + 1) * 3; ++i)
+				for (size_t j = (k % 3) * 3; j < (k % 3 + 1) * 3; ++j)
+					if (_type2D[i][j] == elemType::unknown && _candidateSet2D[i][j].count(avail) > 0)
+						++tempCount;
+			if (tempCount == 1) {// Unique candidate
+				for (size_t i = (k / 3) * 3; i < (k / 3 + 1) * 3; ++i)
+					for (size_t j = (k % 3) * 3; j < (k % 3 + 1) * 3; ++j)
+						if (_type2D[i][j] == elemType::unknown && _candidateSet2D[i][j].count(avail) > 0) {
+							_data2D[i][j] = avail;
+							_type2D[i][j] = elemType::solved;
+							isAnythingChanged = true;
+							break;
+						}
+			}
+		}
+	if (isAnythingChanged)
+		InitializeAvailability(); // Reinitialize _rowAvail, _colAvail, _blkAvail
 }
 
 template <typename T>
@@ -351,9 +426,11 @@ template <typename T>
 bool Sudoku<T>::Solve()
 {
 	// Count candidate with input
-	if (_solverCallCount == 0)
-		Initialize();
-	if (++_solverCallCount % 50 == 0)
+	if (_solverCallCount == 0){
+		InitializeAvailability();
+		InitializeCandidate();
+	}
+	if (++_solverCallCount % 1 == 0)
 		std::cout << "Iteration: " << _solverCallCount << std::endl;
 
 	// Reduce candidate until there is no more update in candidate list
@@ -361,7 +438,6 @@ bool Sudoku<T>::Solve()
 	T newCount;
 	while (true) {
 		ReduceCandidate();
-		Convert2Solution();
 		newCount = CountTotalCandidate();
 		if (previousCount > newCount) {
 			previousCount = newCount;

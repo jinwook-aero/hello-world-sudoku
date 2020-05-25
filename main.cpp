@@ -3,7 +3,7 @@
 //
 // Authors      : Jinwook Lee, Sungwook Lee
 // First version: May 24, 2020
-// Last update  : May 24, 2020
+// Last update  : May 25, 2020
 //
 
 #pragma once
@@ -11,7 +11,7 @@
 #include <chrono> 
 #include "sudoku.h"
 
-#define DIFFICULTY 3 // 0 1 2 3
+#define DIFFICULTY 3 // 0 [5->5ms] 1[2417->184ms] 2[8078->1294ms] 3[11411->447ms]
 
 int main()
 {	
@@ -100,7 +100,6 @@ int main()
 	std::cout << "\n\n============ Solving ============\n";
 	auto start = std::chrono::high_resolution_clock::now();
 	newGame.Solve();
-	//newGame.SolveDirect();
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
 
