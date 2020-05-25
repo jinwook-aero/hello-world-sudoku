@@ -17,14 +17,13 @@
 #include <windows.h>
 
 // Default size
-constexpr int nRowDefault{ 9 };
-constexpr int nColDefault{ nRowDefault };
-constexpr int nBlkDefault{ nRowDefault };
+constexpr int nSizeDefault{ 9 };
+constexpr int nSizeBlkDefault{ nSizeDefault/3 };
 constexpr int invalid{ 0 };
 constexpr int minRange{ 1 };
-constexpr int maxRange{ nRowDefault };
+constexpr int maxRange{ nSizeDefault };
 
-enum class elemType { input, solved, temporary, unknown };
+enum class elemType { input, solved, unknown };
 
 // Sudoku class
 template <typename T = int>
@@ -32,35 +31,34 @@ class Sudoku
 {
 public:
 	Sudoku();
-	Sudoku(T nRow,T nCol);
+	Sudoku(T nSize);
 	~Sudoku() = default;
 	Sudoku(const Sudoku<T> &);
 
 	void Set();
-	void Set(T inputArray [nRowDefault][nColDefault]);
+	void Set(T inputArray [nSizeDefault][nSizeDefault]);
 	void Display();
 	bool Solve();
-	bool SolveDirect();
 
 private:
 	// Data structure
-	T _nRow, _nCol, _nBlk;
-	static T _nSolverCount;
+	T _nSize;
+	static T _solverCallCount;
 	std::vector<std::vector<T>> _data2D; // Actual number data
+	std::vector<std::vector<elemType>> _type2D; // Date type
 	std::vector<std::vector<T>> _candiateCount2D; // Candidate 
 	std::vector<std::vector<std::set<T>>> _candidateSet2D; // Candidate set
-	std::vector<std::vector<elemType>> _type2D; // Date type
-
-	std::vector<std::set<T>> _rowAvail; // Set of available numbers for the row
-	std::vector<std::set<T>> _colAvail; // Set of available numbers for the col
-	std::vector<std::set<T>> _blkAvail; // Set of available numbers for the block
 
 	// Solver subroutine
-	bool CandidateCount(bool includeInput); // Returns if any solution is found
+	void Initialize(); // Initialize candidate list
+	T CountTotalCandidate(); // Returns sum of candidate count
+	void ReduceCandidate();
+	void GuessCandidate(size_t iRow, size_t jCol, size_t nOrder); // Select nOrder'th candidate on (iRow,jCol)
+	void RemoveCandidate(size_t iRow, size_t jCol, size_t nOrder); // Remove nOrder'th candiate from (iRow,jCol)
+	void Convert2Solution(); // Convert single candidate to solution
+
 	bool IsConsistent(); // Returns if current solution space is 
 	bool IsSolved(); // Returns if current solution space is consistent
-	void Guess(size_t iRow, size_t jCol, size_t nOrder); // nOrder'th guess on (iRow,jCol)
-	void Remove(size_t iRow, size_t jCol, size_t nOrder); // Remove nOrder'th guess on (iRow,jCol)
 
 	// Window console color text
 	// REF(by Brandon): https://stackoverflow.com/questions/25559077/how-to-get-background-color-back-to-previous-color-after-use-of-std-handle
@@ -80,63 +78,41 @@ private:
 };
 
 template <typename T>
-T Sudoku<T>::_nSolverCount = 0;
+T Sudoku<T>::_solverCallCount = 0;
 
 template <typename T>
 Sudoku<T>::Sudoku():
-	Sudoku{static_cast<T>(nRowDefault), static_cast<T>(nColDefault)}
+	Sudoku{static_cast<T>(nSizeDefault)}
 {
 }
 
 template<typename T>
-Sudoku<T>::Sudoku(T nRow, T nCol):
-	_nRow{ nRow }, _nCol{ nCol }, _nBlk{ nRow }
+Sudoku<T>::Sudoku(T nSize):
+	_nSize{ nSize }
 {
-	_data2D.resize(_nRow, std::vector<T>(_nCol, invalid));
-	_candiateCount2D.resize(_nRow, std::vector<T>(_nCol, maxRange));
-	_type2D.resize(_nRow, std::vector<elemType>(_nCol, elemType::unknown));
-	_candidateSet2D.resize(_nRow, std::vector<std::set<T>>(_nCol));
-
-	_rowAvail.resize(_nRow, std::set<T>{});
-	_colAvail.resize(_nCol, std::set<T>{});
-	_blkAvail.resize(_nBlk, std::set<T>{});
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
-			_rowAvail[i].insert(j + 1);
-			_colAvail[j].insert(i + 1);
-		}
-	}
-	for (size_t k = 0; k < _nBlk; ++k) {
-		for (size_t r = 0; r < maxRange; ++r) {
-			_blkAvail[k].insert(r + 1);
-		}
-	}
+	_data2D.resize(_nSize, std::vector<T>(_nSize, invalid));
+	_type2D.resize(_nSize, std::vector<elemType>(_nSize, elemType::unknown));
+	_candiateCount2D.resize(_nSize, std::vector<T>(_nSize));
+	_candidateSet2D.resize(_nSize, std::vector<std::set<T>>(_nSize));
 }
 
 template <typename T>
 Sudoku<T>::Sudoku(const Sudoku<T> & rhs)
 {
-	_nRow = rhs._nRow;
-	_nCol = rhs._nCol;
-	_nBlk = rhs._nBlk;
-	_nSolverCount = rhs._nSolverCount;
+	_nSize = rhs._nSize;
 
 	_data2D = rhs._data2D;
 	_type2D = rhs._type2D;
 	_candiateCount2D = rhs._candiateCount2D;
 	_candidateSet2D  = rhs._candidateSet2D;
-
-	_rowAvail = rhs._rowAvail;
-	_colAvail = rhs._colAvail;
-	_blkAvail = rhs._blkAvail;
 }
 
 template <typename T>
 void Sudoku<T>::Set()
 {
 	T tempInput;
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j) {
 			std::cout << "Enter Data [" << i << "][" << j << "]: \n";
 			std::cin >> tempInput;
 			if (tempInput == invalid)
@@ -150,10 +126,10 @@ void Sudoku<T>::Set()
 }
 
 template <typename T>
-void Sudoku<T>::Set(T inputArray[nRowDefault][nColDefault])
+void Sudoku<T>::Set(T inputArray[nSizeDefault][nSizeDefault])
 {
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j) {
 			if (inputArray[i][j] == invalid)
 				_type2D[i][j] = elemType::unknown;
 			else
@@ -166,11 +142,13 @@ void Sudoku<T>::Set(T inputArray[nRowDefault][nColDefault])
 template <typename T>
 void Sudoku<T>::Display()
 {
+	auto drawLine = [](){ std::cout << " -----------------------\n"; };
+
 	WORD Attributes = 0;
-	std::cout << "\n -----------------------\n";
-	for (size_t i = 0; i < _nRow; ++i) {
+	drawLine();
+	for (size_t i = 0; i < _nSize; ++i) {
 		std::cout << " | ";
-		for (size_t j = 0; j < _nCol; ++j) {
+		for (size_t j = 0; j < _nSize; ++j) {
 			if (_type2D[i][j] == elemType::input)
 				SetConsoleColour(&Attributes, FOREGROUND_INTENSITY | BACKGROUND_BLUE);
 			else if (_type2D[i][j] == elemType::solved)
@@ -188,66 +166,118 @@ void Sudoku<T>::Display()
 		}
 		std::cout << "\n";
 		if (i % 3 == 2)
-			std::cout << " -----------------------\n";
+			drawLine();
 	}
 }
 
 template <typename T>
-bool Sudoku<T>::CandidateCount(bool includeInput)
+void Sudoku<T>::Initialize()
 {
-	// Update available number list
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
-			if (_type2D[i][j] == elemType::solved || (!includeInput && _type2D[i][j] == elemType::input))
-				continue;
-			const T curElem = _data2D[i][j];
-			const size_t k = (i / 3) * 3 + (j / 3);
-			_rowAvail[i].erase(curElem);
-			_colAvail[j].erase(curElem);
-			_blkAvail[k].erase(curElem);
+	// Initialize availability list
+	std::vector<std::set<T>> _rowAvail; // Available list 
+	std::vector<std::set<T>> _colAvail; // Available list
+	std::vector<std::set<T>> _blkAvail; // Available list
+	_rowAvail.resize(_nSize, std::set<T>{});
+	_colAvail.resize(_nSize, std::set<T>{});
+	_blkAvail.resize(_nSize, std::set<T>{});
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j) {
+			_rowAvail[i].insert(j + 1);
+			_colAvail[j].insert(i + 1);
+		}
+	}
+	for (size_t k = 0; k < _nSize; ++k) {
+		for (size_t r = 0; r < maxRange; ++r) {
+			_blkAvail[k].insert(r + 1);
 		}
 	}
 
-	// Recount candidate
-	bool anySolutionFound = false;
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
-			if (_type2D[i][j] == elemType::solved || (!includeInput && _type2D[i][j] == elemType::input))
-				continue;
-			T tempCount = 0;
-			T tempAvail{ invalid };
-			const size_t k = (i / 3) * 3 + (j / 3);
-			_candidateSet2D[i][j].clear();
-			for (T r = 0; r < maxRange; ++r)
-				if ((_rowAvail[i].find(r+1) != _rowAvail[i].end()) &&
-					(_colAvail[j].find(r+1) != _colAvail[j].end()) &&
-					(_blkAvail[k].find(r+1) != _blkAvail[k].end())){
-					tempAvail = r+1;
-					_candidateSet2D[i][j].insert(tempAvail);
-					++tempCount;
-				}
-			_candiateCount2D[i][j] = tempCount;
-
-			// Solution found if count is one
-			if (tempCount == 1 && _type2D[i][j] != elemType::input && _type2D[i][j] != elemType::solved){
-				_type2D[i][j] = elemType::solved;
-				_data2D[i][j] = tempAvail;
-				_rowAvail[i].erase(tempAvail);
-				_colAvail[j].erase(tempAvail);
-				_blkAvail[k].erase(tempAvail);
-				anySolutionFound = true;
+	// Reduce available numbers if encountered as input
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j) {
+			if (_type2D[i][j] == elemType::input){
+				const T curElem = _data2D[i][j];
+				const size_t k = (i / nSizeBlkDefault) * nSizeBlkDefault + (j / nSizeBlkDefault);
+				_rowAvail[i].erase(curElem);
+				_colAvail[j].erase(curElem);
+				_blkAvail[k].erase(curElem);
 			}
 		}
 	}
-	return anySolutionFound;
+
+	// Initialize candidate list
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j) {
+			if (_type2D[i][j] != elemType::input){
+				T tempCount = 0;
+				T tempAvail{ invalid };
+				const size_t k = (i / nSizeBlkDefault) * nSizeBlkDefault + (j / nSizeBlkDefault);
+				_candidateSet2D[i][j].clear();
+				for (T r = 0; r < maxRange; ++r)
+					if ((_rowAvail[i].find(r + 1) != _rowAvail[i].end()) &&
+						(_colAvail[j].find(r + 1) != _colAvail[j].end()) &&
+						(_blkAvail[k].find(r + 1) != _blkAvail[k].end())) {
+						tempAvail = r + 1;
+						_candidateSet2D[i][j].insert(tempAvail);
+						++tempCount;
+					}
+				_candiateCount2D[i][j] = tempCount;
+			}
+		}
+	}
+
+	// Single candidate is a readily availalbe solution
+	Convert2Solution();
 }
 
+template <typename T>
+T Sudoku<T>::CountTotalCandidate() {
+	T tempSum = 0;
+	for (size_t i = 0; i < _nSize; ++i)
+		for (size_t j = 0; j < _nSize; ++j)
+			if (_type2D[i][j] == elemType::unknown)
+				tempSum += _candiateCount2D[i][j];
+	return tempSum;
+}
+
+
+template <typename T>
+void Sudoku<T>::Convert2Solution()
+{
+	// Single candidate is solution
+	for (size_t i = 0; i < _nSize; ++i)
+		for (size_t j = 0; j < _nSize; ++j)
+			if (_type2D[i][j] == elemType::unknown && _candiateCount2D[i][j] == 1) {
+				_data2D[i][j] = *(_candidateSet2D[i][j].begin());
+				_type2D[i][j] = elemType::solved;
+				_candiateCount2D[i][j] = 0;
+				_candidateSet2D[i][j].clear();
+			}
+}
+
+template <typename T>
+void Sudoku<T>::ReduceCandidate()
+{
+	// Reduce candidate space
+	for (size_t i = 0; i < _nSize; ++i)
+		for (size_t j = 0; j < _nSize; ++j) {
+			if (_type2D[i][j] != elemType::unknown)
+				continue;
+			for (size_t test = 0; test < _candiateCount2D[i][j]; ++test) {
+				Sudoku<T> testGame = *this;
+				testGame.GuessCandidate(i, j, test);
+				if (!testGame.IsConsistent()) {
+					this->RemoveCandidate(i, j, test);
+				}
+			}
+		}
+}
 
 template <typename T>
 bool Sudoku<T>::IsSolved()
 {
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j)
+	for (size_t i = 0; i < _nSize; ++i) {
+		for (size_t j = 0; j < _nSize; ++j)
 			if (_type2D[i][j] != elemType::solved && _type2D[i][j] != elemType::input)
 				return false;
 	}
@@ -259,27 +289,27 @@ bool Sudoku<T>::IsConsistent()
 {
 	// Row consistency
 	std::set<T> tempSet;
-	for (size_t i = 0; i < _nRow; ++i) {
+	for (size_t i = 0; i < _nSize; ++i) {
 		tempSet.clear();
-		for (size_t j = 0; j < _nCol; ++j)
+		for (size_t j = 0; j < _nSize; ++j)
 			if (_type2D[i][j] == elemType::solved || _type2D[i][j] == elemType::input)
 				if (tempSet.insert(_data2D[i][j]).second == false)
 					return false; // Duplicate detected
 	}
 
 	// Col consistency
-	for (size_t j = 0; j < _nCol; ++j) {
+	for (size_t j = 0; j < _nSize; ++j) {
 		tempSet.clear();
-		for (size_t i = 0; i < _nRow; ++i)
+		for (size_t i = 0; i < _nSize; ++i)
 			if (_type2D[i][j] == elemType::solved || _type2D[i][j] == elemType::input)
 				if (tempSet.insert(_data2D[i][j]).second == false)
 					return false; // Duplicate detected
 	}
 
 	// Blk consistency
-	for (size_t k = 0; k < _nBlk; ++k){
+	for (size_t k = 0; k < _nSize; ++k){
 		tempSet.clear();
-		for (size_t i = 0; i < (k / 3 + 1); ++i) {
+		for (size_t i = (k / 3)*3; i < (k / 3 + 1)*3; ++i) {
 			for (size_t j = (k % 3)*3; j < (k % 3 + 1)*3; ++j)
 				if (_type2D[i][j] == elemType::solved || _type2D[i][j] == elemType::input)
 					if (tempSet.insert(_data2D[i][j]).second == false)
@@ -292,25 +322,21 @@ bool Sudoku<T>::IsConsistent()
 }
 
 template <typename T>
-void Sudoku<T>::Guess(size_t i, size_t j, size_t nOrder)
+void Sudoku<T>::GuessCandidate(size_t i, size_t j, size_t nOrder)
 {
 	// nOrder'th candidate
 	auto iter = (_candidateSet2D[i][j]).begin();
 	std::advance(iter, nOrder);
 
-	// Guess nOrder'th candidate
+	// Select nOrder'th candidate
 	_data2D[i][j] = *iter;
 	_type2D[i][j] = elemType::solved;
-
-	_rowAvail[i].erase(*iter);
-	_colAvail[j].erase(*iter);
-
-	const size_t k = (i / 3) * 3 + (j / 3);
-	_blkAvail[k].erase(*iter);
+	_candiateCount2D[i][j] = 0;
+	_candidateSet2D[i][j].clear();
 }
 
 template <typename T>
-void Sudoku<T>::Remove(size_t i, size_t j, size_t nOrder)
+void Sudoku<T>::RemoveCandidate(size_t i, size_t j, size_t nOrder)
 {
 	// nOrder'th candidate
 	auto iter = _candidateSet2D[i][j].begin();
@@ -319,70 +345,50 @@ void Sudoku<T>::Remove(size_t i, size_t j, size_t nOrder)
 	// Remove nOrder'th candidate
 	_candidateSet2D[i][j].erase(*iter);
 	--_candiateCount2D[i][j];
-
-	// If only one left, it's solution
-	if (_candiateCount2D[i][j] == 1) {
-		_data2D[i][j] = *iter;
-		_type2D[i][j] = elemType::solved;
-
-		_rowAvail[i].erase(*iter);
-		_colAvail[j].erase(*iter);
-
-		const size_t k = (i / 3) * 3 + (j / 3);
-		_blkAvail[k].erase(*iter);
-	}
 }
 
 template <typename T>
 bool Sudoku<T>::Solve()
 {
 	// Count candidate with input
-	if (_nSolverCount == 0)
-		CandidateCount(true);
-	++_nSolverCount;
+	if (_solverCallCount == 0)
+		Initialize();
+	if (++_solverCallCount % 50 == 0)
+		std::cout << "Iteration: " << _solverCallCount << std::endl;
 
-	// Count candidate without input until there is no more update in solution
-	while (CandidateCount(false)) {}
+	// Reduce candidate until there is no more update in candidate list
+	T previousCount = CountTotalCandidate();
+	T newCount;
+	while (true) {
+		ReduceCandidate();
+		Convert2Solution();
+		newCount = CountTotalCandidate();
+		if (previousCount > newCount) {
+			previousCount = newCount;
+		}
+		else
+			break;
+	}
 
 	// Status check
 	if (!IsConsistent())
 		return false;
-	if (IsSolved())
+	if (IsSolved()){
+		std::cout << "Solution found at iteration: " << _solverCallCount << std::endl;
 		return true;
-
-	if (_nSolverCount % 1 == 0) {
-		std::cout << "\n\nSolution step: " << _nSolverCount << std::endl;
-		Display();
-	}
-
-	// Sweep to invalidate
-	for (size_t i = 0; i < _nRow; ++i) {
-		for (size_t j = 0; j < _nCol; ++j) {
-			for (size_t test = 0; test < _candiateCount2D[i][j]; ++test) {
-				Sudoku<T> testGame = *this;
-				testGame.Guess(i, j, test);
-				testGame.CandidateCount(false);
-				if (!testGame.IsConsistent()){
-					this->Remove(i, j, test);
-					std::cout << "candidate removed on [" << i << "][" << j << "]\n";
-				}
-			}
-		}
 	}
 
 	// Identify min-candidate case for recursive call
 	size_t nGuess{ maxRange };
-	for (size_t i = 0; i < _nRow; ++i)
-		for (size_t j = 0; j < _nCol; ++j)
-			if (_type2D[i][j] != elemType::solved && _type2D[i][j] != elemType::input &&
-				(_candiateCount2D[i][j] < nGuess))
+	for (size_t i = 0; i < _nSize; ++i)
+		for (size_t j = 0; j < _nSize; ++j)
+			if (_type2D[i][j] == elemType::unknown && _candiateCount2D[i][j] < nGuess )
 				nGuess = _candiateCount2D[i][j];
 	size_t iTarget = maxRange;
 	size_t jTarget = maxRange;
-	for (size_t i = 0; i < _nRow; ++i){
-		for (size_t j = 0; j < _nCol; ++j)
-			if (_type2D[i][j] != elemType::solved && _type2D[i][j] != elemType::input &&
-				_candiateCount2D[i][j] == nGuess){
+	for (size_t i = 0; i < _nSize; ++i){
+		for (size_t j = 0; j < _nSize; ++j)
+			if (_type2D[i][j] == elemType::unknown && _candiateCount2D[i][j] == nGuess) {
 				iTarget = i;
 				jTarget = j;
 				break;
@@ -390,17 +396,16 @@ bool Sudoku<T>::Solve()
 		if (iTarget < maxRange && jTarget < maxRange)
 			break;
 	}
-	if (!nGuess)
-		return false;
 
 	// Recursive call on nGuess
 	for (size_t nOrder = 0; nOrder < nGuess; ++nOrder)
 	{
 		Sudoku<T> recurGame = *this;
-		recurGame.Guess(iTarget, jTarget, nOrder);
+		recurGame.GuessCandidate(iTarget, jTarget, nOrder);
 		if (recurGame.Solve()) {
 			*this = recurGame;
 			return true;
 		}
 	}
+	return false; // Solution not found in current guess
 }
