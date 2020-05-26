@@ -33,9 +33,9 @@ public:
 	Sudoku(const Sudoku<T> &);
 
 	void Set();
-	void Set(T inputArray [nSizeDefault][nSizeDefault]);
+	void Set(std::vector<std::vector<T>> inputVec2D);
 	void Display();
-	bool Solve();
+	bool Solve(bool isQuietMode = true);
 
 private:
 	// Data structure
@@ -136,15 +136,15 @@ void Sudoku<T>::Set()
 }
 
 template <typename T>
-void Sudoku<T>::Set(T inputArray[nSizeDefault][nSizeDefault])
+void Sudoku<T>::Set(std::vector<std::vector<T>> inputVec2D)
 {
 	for (size_t i = 0; i < _nSize; ++i) {
 		for (size_t j = 0; j < _nSize; ++j) {
-			if (inputArray[i][j] == invalid)
+			if (inputVec2D[i][j] == invalid)
 				_type2D[i][j] = elemType::unknown;
 			else
 				_type2D[i][j] = elemType::input;
-			_data2D[i][j] = inputArray[i][j];
+			_data2D[i][j] = inputVec2D[i][j];
 		}
 	}
 }
@@ -423,14 +423,15 @@ void Sudoku<T>::RemoveCandidate(size_t i, size_t j, size_t nOrder)
 }
 
 template <typename T>
-bool Sudoku<T>::Solve()
+bool Sudoku<T>::Solve(bool isQuietMode)
 {
 	// Count candidate with input
 	if (_solverCallCount == 0){
 		InitializeAvailability();
 		InitializeCandidate();
 	}
-	if (++_solverCallCount % 1 == 0)
+	++_solverCallCount;
+	if (!isQuietMode)
 		std::cout << "Iteration: " << _solverCallCount << std::endl;
 
 	// Reduce candidate until there is no more update in candidate list
@@ -450,7 +451,8 @@ bool Sudoku<T>::Solve()
 	if (!IsConsistent())
 		return false;
 	if (IsSolved()){
-		std::cout << "Solution found at iteration: " << _solverCallCount << std::endl;
+		if (!isQuietMode)
+			std::cout << "Solution found at iteration: " << _solverCallCount << std::endl;
 		return true;
 	}
 
@@ -478,7 +480,7 @@ bool Sudoku<T>::Solve()
 	{
 		Sudoku<T> recurGame = *this;
 		recurGame.GuessCandidate(iTarget, jTarget, nOrder);
-		if (recurGame.Solve()) {
+		if (recurGame.Solve(isQuietMode)) {
 			*this = recurGame;
 			return true;
 		}
